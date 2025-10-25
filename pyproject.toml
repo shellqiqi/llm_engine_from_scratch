@@ -14,5 +14,6 @@ dependencies = [
     "nbstripout>=0.8.1",
     "safetensors>=0.6.2",
     "torch>=2.9.0",
+    "torchinfo>=1.8.0",
     "transformers>=4.57.1",
 ]
