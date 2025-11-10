@@ -1,13 +1,11 @@
-import torch
-import torch.nn as nn
-
-import os
-from safetensors import safe_open
-from glob import glob
 import json
-
+import os
+from glob import glob
 from types import SimpleNamespace
 
+import torch
+import torch.nn as nn
+from safetensors import safe_open
 from transformers import Qwen2Tokenizer
 
 """
@@ -74,10 +72,11 @@ class RotaryEmbedding(nn.Module):
 
 
 def make_causal_mask(attention_mask: torch.Tensor, dtype: torch.dtype = torch.float32):
+    device = attention_mask.device
     # input: [batch_size, seq_len]
     seq_len = attention_mask.shape[1]
     # [seq_len, seq_len]
-    causal_mask = torch.tril(torch.ones(seq_len, seq_len))
+    causal_mask = torch.tril(torch.ones(seq_len, seq_len)).to(device)
     # [batch_size, seq_len, seq_len]
     pad_mask = attention_mask.unsqueeze(1).expand(-1, seq_len, -1)
     # output: [batch_size, seq_len, seq_len]
@@ -117,6 +116,7 @@ class Qwen3Attention(nn.Module):
         num_kv_heads: int,
         head_dim: int,
         rms_norm_eps: float = 1e-6,
+        rotary_emb: nn.Module = None,
     ):
         super().__init__()
         self.head_dim = head_dim
@@ -127,7 +127,7 @@ class Qwen3Attention(nn.Module):
         self.o_proj = nn.Linear(num_heads * head_dim, hidden_size)
         self.q_norm = RMSNorm(head_dim, rms_norm_eps)
         self.k_norm = RMSNorm(head_dim, rms_norm_eps)
-        self.rotary_emb = RotaryEmbedding(head_dim)
+        self.rotary_emb = rotary_emb if rotary_emb else RotaryEmbedding(head_dim)
         self.scaling = self.head_dim**-0.5
 
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor):
@@ -198,12 +198,17 @@ class Qwen3MLP(nn.Module):
 class Qwen3DecoderLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.rotary_emb = RotaryEmbedding(
+            config.head_dim,
+            base=config.rope_theta,
+        )
         self.self_attn = Qwen3Attention(
             config.hidden_size,
             config.num_attention_heads,
             config.num_key_value_heads,
             config.head_dim,
             config.rms_norm_eps,
+            self.rotary_emb,
         )
         self.mlp = Qwen3MLP(
             config.hidden_size,
@@ -288,7 +293,6 @@ model_weight_path = os.path.expanduser("~/huggingface/Qwen3-0.6B/")
 
 model_config = load_model_config(model_weight_path)
 model = Qwen3ForCausalLM(model_config)
-model.eval()
 
 load_model(model, model_weight_path)
 
@@ -313,7 +317,7 @@ texts = [
     )
     for messages in chats
 ]
-model_inputs = tokenizer(texts, return_tensors="pt", padding=True)
+model_inputs = tokenizer(texts, return_tensors="pt", padding=True).to(device)
 
 
 def get_next_inputs(
@@ -366,6 +370,7 @@ def step(model: nn.Module, model_inputs: dict[str, torch.Tensor]):
     return model.compute_logits(model(**model_inputs)).argmax(dim=-1)
 
 
+@torch.inference_mode
 def generate(
     model: nn.Module,
     model_config,
