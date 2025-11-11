@@ -320,6 +320,11 @@ texts = [
 model_inputs = tokenizer(texts, return_tensors="pt", padding=True).to(device)
 
 
+def step(model: nn.Module, model_inputs: dict[str, torch.Tensor]):
+    # output: [batch_size, 1]
+    return model.compute_logits(model(**model_inputs)).argmax(dim=-1)
+
+
 def get_next_inputs(
     last_inputs: dict[str, torch.Tensor],
     sample_tokens: torch.Tensor,
@@ -363,11 +368,6 @@ def get_next_inputs(
         )
 
     return next_inputs, finished_inputs
-
-
-def step(model: nn.Module, model_inputs: dict[str, torch.Tensor]):
-    # output: [batch_size, 1]
-    return model.compute_logits(model(**model_inputs)).argmax(dim=-1)
 
 
 @torch.inference_mode
